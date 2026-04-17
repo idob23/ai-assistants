@@ -3,7 +3,6 @@
 import asyncio
 import logging
 
-from bots.autoelectric.constants import WEB_SEARCH_TOOL
 from bots.autoelectric.x431_parser import X431ReportParser
 
 log = logging.getLogger(__name__)
@@ -82,11 +81,21 @@ async def handle_x431_url(bot, message, url: str):
         response = await bot.claude_client.chat(
             messages=history.get_messages(),
             system=bot.system_prompt,
-            tools=[WEB_SEARCH_TOOL],
         )
         analysis_text = "".join(
             b.text for b in response.content if hasattr(b, "text")
+        ).strip()
+        stop_reason = getattr(response, "stop_reason", None)
+        log.info(
+            "X431 auto-analysis: stop_reason=%s, text_len=%d, output_tokens=%d",
+            stop_reason,
+            len(analysis_text),
+            response.usage.output_tokens,
         )
+        if not analysis_text:
+            log.warning("X431 auto-analysis produced empty text — skipping reply")
+            history.messages.pop()  # rollback analysis_prompt
+            return
         history.add_assistant(analysis_text)
         await bot.reply(message, analysis_text)
     except Exception as exc:
