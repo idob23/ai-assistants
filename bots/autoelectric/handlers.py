@@ -73,4 +73,7 @@ async def handle_x431_url(bot, message, url: str):
     await bot.reply(message, summary)
 
     chat_id = message.chat.id
-    bot.get_history(chat_id).add_user(f"Отчёт X431: {summary}")
+    history = bot.get_history(chat_id)
+    user_turn = (message.text or "").strip() or url
+    history.add_user(user_turn)
+    history.add_assistant(summary)
