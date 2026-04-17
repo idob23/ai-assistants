@@ -13,11 +13,18 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5433/autoelectric"
     WHISPER_MODEL: str = "small"
     LOG_LEVEL: str = "INFO"
+    TELEGRAM_ALLOWED_USERS: str = ""
 
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
     }
+
+    @property
+    def allowed_user_ids(self) -> list[int]:
+        if not self.TELEGRAM_ALLOWED_USERS:
+            return []
+        return [int(x.strip()) for x in self.TELEGRAM_ALLOWED_USERS.split(",") if x.strip()]
 
 
 @lru_cache
