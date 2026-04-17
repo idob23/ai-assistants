@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: autoelectric
       POSTGRES_DB: autoelectric
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./migrations:/docker-entrypoint-initdb.d

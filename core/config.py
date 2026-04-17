@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     CLAUDE_API_KEY: str
     CLAUDE_MODEL: str = "claude-sonnet-4-20250514"
     CLAUDE_BASE_URL: str = "https://api.anthropic.com"
-    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5433/autoelectric"
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5434/autoelectric"
     WHISPER_MODEL: str = "small"
     LOG_LEVEL: str = "INFO"
     TELEGRAM_ALLOWED_USERS: str = ""
@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     model_config = {
         "env_file": ".env",
         "env_file_encoding": "utf-8",
+        "extra": "ignore",
     }
 
     @property

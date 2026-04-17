@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from bots.autoelectric.constants import WEB_SEARCH_TOOL
 from bots.autoelectric.x431_parser import X431ReportParser
 
 log = logging.getLogger(__name__)
@@ -55,19 +56,11 @@ async def handle_x431_url(bot, message, url: str):
         f"Найдено {fault_count} кодов ошибок "
         f"в {len(report.subsystems)} подсистемах:",
     ]
-    shown = 0
     for sub in report.subsystems:
         for fc in sub.fault_codes:
-            if shown >= 5:
-                break
             lines.append(
                 f"- {sub.name}: {fc.code} — {fc.description} ({fc.status})"
             )
-            shown += 1
-        if shown >= 5:
-            break
-    if fault_count > 5:
-        lines.append(f"... и ещё {fault_count - 5}")
 
     summary = "\n".join(lines)
     await bot.reply(message, summary)
@@ -77,3 +70,25 @@ async def handle_x431_url(bot, message, url: str):
     user_turn = (message.text or "").strip() or url
     history.add_user(user_turn)
     history.add_assistant(summary)
+
+    # Auto-analysis: ask model to comment on the codes
+    analysis_prompt = (
+        "Проанализируй эти коды ошибок. Сгруппируй их по системам, "
+        "определи наиболее вероятную общую причину и дай 2-3 гипотезы "
+        "с критериями проверки. Формат гипотез как в system_prompt."
+    )
+    history.add_user(analysis_prompt)
+    try:
+        response = await bot.claude_client.chat(
+            messages=history.get_messages(),
+            system=bot.system_prompt,
+            tools=[WEB_SEARCH_TOOL],
+        )
+        analysis_text = "".join(
+            b.text for b in response.content if hasattr(b, "text")
+        )
+        history.add_assistant(analysis_text)
+        await bot.reply(message, analysis_text)
+    except Exception as exc:
+        history.messages.pop()  # rollback user-turn
+        log.error("Claude analysis after X431 failed: %s", exc, exc_info=True)

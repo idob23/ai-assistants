@@ -7,12 +7,14 @@
 import asyncio
 import logging
 import re
+import sys
 from pathlib import Path
 
 from aiogram.types import Message
 
 from core.config import get_settings
 from core.telegram_bot import BaseTelegramBot
+from bots.autoelectric.constants import WEB_SEARCH_TOOL, X431_MARKER
 from bots.autoelectric.db import Database
 from bots.autoelectric.handlers import handle_x431_url
 
@@ -26,14 +28,6 @@ FALLBACK_PROMPT = (
     "Давай 2-3 гипотезы с измеримыми критериями проверки. "
     "Честность важнее уверенности — говори «не знаю» когда не знаешь."
 )
-
-X431_MARKER = "x431.com/home/report/reportdetail"
-
-WEB_SEARCH_TOOL = {
-    "type": "web_search_20250305",
-    "name": "web_search",
-    "max_uses": 3,
-}
 
 
 class AutoelectricBot(BaseTelegramBot):
@@ -69,6 +63,16 @@ class AutoelectricBot(BaseTelegramBot):
     async def handle_text(self, message: Message):
         """Override base: intercept /commands before process_message."""
         if message.text and message.text.startswith("/"):
+            chat_id = message.chat.id
+            cancelled = False
+            if chat_id in self._pending_close:
+                self._pending_close.pop(chat_id)
+                cancelled = True
+            if chat_id in self._pending_miscall:
+                self._pending_miscall.pop(chat_id)
+                cancelled = True
+            if cancelled:
+                await message.answer("Ожидание отменено.")
             cmd = message.text.split()[0].split("@")[0]
             if cmd == "/start":
                 return await self.cmd_start(message)
@@ -219,4 +223,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())
