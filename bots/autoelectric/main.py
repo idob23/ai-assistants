@@ -58,6 +58,18 @@ class AutoelectricBot(BaseTelegramBot):
                 except ValueError:
                     pass
 
+    async def _find_open_case_id(self, chat_id: int) -> int | None:
+        """Return open case_id from cache or fall back to DB."""
+        cached = self._active_case.get(chat_id)
+        if cached:
+            return cached
+        cases = await self.db.get_open_cases()
+        for c in cases:
+            if c.get("telegram_thread_id") == f"tg:{chat_id}":
+                self._active_case[chat_id] = c["id"]
+                return c["id"]
+        return None
+
     # --- command handlers (dispatched from handle_text) ---
 
     async def handle_text(self, message: Message):
@@ -85,8 +97,17 @@ class AutoelectricBot(BaseTelegramBot):
         await self.process_message(message, text=message.text)
 
     async def cmd_start(self, message: Message):
-        self.get_history(message.chat.id).clear()
-        self._active_case.pop(message.chat.id, None)
+        chat_id = message.chat.id
+        self.get_history(chat_id).clear()
+        # Close dangling case in DB if any
+        case_id = await self._find_open_case_id(chat_id)
+        if case_id:
+            await self.db.close_case(
+                case_id,
+                resolution="abandoned (/start)",
+                confidence="low",
+            )
+            self._active_case.pop(chat_id, None)
         await message.answer(
             "Я агент-автоэлектрик. Опиши симптом (текст/голос/фото) "
             "или пришли ссылку на отчёт X431.\n"
@@ -106,7 +127,7 @@ class AutoelectricBot(BaseTelegramBot):
 
     async def cmd_close(self, message: Message):
         chat_id = message.chat.id
-        case_id = self._active_case.get(chat_id)
+        case_id = await self._find_open_case_id(chat_id)
         if not case_id:
             await message.answer("Нет открытых кейсов для этого чата.")
             return
@@ -117,7 +138,7 @@ class AutoelectricBot(BaseTelegramBot):
 
     async def cmd_miscall(self, message: Message):
         chat_id = message.chat.id
-        case_id = self._active_case.get(chat_id)
+        case_id = await self._find_open_case_id(chat_id)
         if not case_id:
             await message.answer("Нет открытых кейсов для этого чата.")
             return
@@ -157,7 +178,7 @@ class AutoelectricBot(BaseTelegramBot):
             return
 
         # Auto-open case on first meaningful message in chat
-        if chat_id not in self._active_case and text:
+        if text and await self._find_open_case_id(chat_id) is None:
             case_id = await self.db.create_case(
                 vehicle_id=None,
                 session_id=None,
