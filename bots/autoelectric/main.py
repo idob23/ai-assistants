@@ -10,7 +10,7 @@ import re
 import sys
 from pathlib import Path
 
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 
 from core.config import get_settings
 from core.telegram_bot import BaseTelegramBot
@@ -27,6 +27,18 @@ FALLBACK_PROMPT = (
     "неисправности грузовиков (КамАЗ, Урал, Sitrak) и легковых (УАЗ, Mitsubishi L200). "
     "Давай 2-3 гипотезы с измеримыми критериями проверки. "
     "Честность важнее уверенности — говори «не знаю» когда не знаешь."
+)
+
+BTN_STATUS = "📋 Статус"
+BTN_CLOSE = "📝 Закрыть кейс"
+BTN_MISCALL = "🔄 Ошибка агента"
+MAIN_KEYBOARD = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text=BTN_STATUS)],
+        [KeyboardButton(text=BTN_CLOSE), KeyboardButton(text=BTN_MISCALL)],
+    ],
+    resize_keyboard=True,
+    is_persistent=True,
 )
 
 
@@ -73,27 +85,31 @@ class AutoelectricBot(BaseTelegramBot):
     # --- command handlers (dispatched from handle_text) ---
 
     async def handle_text(self, message: Message):
-        """Override base: intercept /commands before process_message."""
-        if message.text and message.text.startswith("/"):
-            chat_id = message.chat.id
-            cancelled = False
-            if chat_id in self._pending_close:
-                self._pending_close.pop(chat_id)
-                cancelled = True
-            if chat_id in self._pending_miscall:
-                self._pending_miscall.pop(chat_id)
-                cancelled = True
-            if cancelled:
-                await message.answer("↩️ Ожидание отменено.")
-            cmd = message.text.split()[0].split("@")[0]
-            if cmd == "/start":
-                return await self.cmd_start(message)
-            if cmd == "/status":
-                return await self.cmd_status(message)
-            if cmd == "/close":
-                return await self.cmd_close(message)
-            if cmd == "/miscall":
-                return await self.cmd_miscall(message)
+        """Override base: intercept /commands and button taps before process_message."""
+        if message.text:
+            cmd_map = {
+                "/start": self.cmd_start,
+                "/status": self.cmd_status,
+                "/close": self.cmd_close,
+                "/miscall": self.cmd_miscall,
+                BTN_STATUS: self.cmd_status,
+                BTN_CLOSE: self.cmd_close,
+                BTN_MISCALL: self.cmd_miscall,
+            }
+            key = message.text.split()[0].split("@")[0] if message.text.startswith("/") else message.text
+            handler = cmd_map.get(key)
+            if handler:
+                chat_id = message.chat.id
+                cancelled = False
+                if chat_id in self._pending_close:
+                    self._pending_close.pop(chat_id)
+                    cancelled = True
+                if chat_id in self._pending_miscall:
+                    self._pending_miscall.pop(chat_id)
+                    cancelled = True
+                if cancelled:
+                    await message.answer("↩️ Ожидание отменено.")
+                return await handler(message)
         await self.process_message(message, text=message.text)
 
     async def cmd_start(self, message: Message):
@@ -116,7 +132,8 @@ class AutoelectricBot(BaseTelegramBot):
             "Команды:\n"
             "/status  — открытые кейсы\n"
             "/close   — закрыть текущий кейс\n"
-            "/miscall — отметить ошибку агента"
+            "/miscall — отметить ошибку агента",
+            reply_markup=MAIN_KEYBOARD,
         )
 
     async def cmd_status(self, message: Message):
