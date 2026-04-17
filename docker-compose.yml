@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: autoelectric
+      POSTGRES_PASSWORD: autoelectric
+      POSTGRES_DB: autoelectric
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d
+
+  autoelectric-bot:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://autoelectric:autoelectric@postgres:5432/autoelectric
+
+volumes:
+  pgdata:
