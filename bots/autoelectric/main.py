@@ -27,7 +27,7 @@ FALLBACK_PROMPT = (
     "Честность важнее уверенности — говори «не знаю» когда не знаешь."
 )
 
-X431_MARKER = "x431.com/Home/Report/reportDetail"
+X431_MARKER = "x431.com/home/report/reportdetail"
 
 
 class AutoelectricBot(BaseTelegramBot):
@@ -42,10 +42,21 @@ class AutoelectricBot(BaseTelegramBot):
         self.db = Database(settings.DATABASE_URL)
         self._pending_close: dict[int, int] = {}
         self._pending_miscall: dict[int, int] = {}
+        self._active_case: dict[int, int] = {}
 
     async def setup(self):
         await self.db.connect()
         await self.db.init_schema()
+        # Restore active cases from DB (survives process restart)
+        cases = await self.db.get_open_cases()
+        for c in cases:
+            tid = c.get("telegram_thread_id") or ""
+            if tid.startswith("tg:"):
+                try:
+                    chat_id = int(tid[3:])
+                    self._active_case[chat_id] = c["id"]
+                except ValueError:
+                    pass
 
     # --- command handlers (dispatched from handle_text) ---
 
@@ -65,6 +76,7 @@ class AutoelectricBot(BaseTelegramBot):
 
     async def cmd_start(self, message: Message):
         self.get_history(message.chat.id).clear()
+        self._active_case.pop(message.chat.id, None)
         await message.answer(
             "Я агент-автоэлектрик. Опиши симптом (текст/голос/фото) "
             "или пришли ссылку на отчёт X431.\n"
@@ -84,32 +96,22 @@ class AutoelectricBot(BaseTelegramBot):
 
     async def cmd_close(self, message: Message):
         chat_id = message.chat.id
-        cases = await self.db.get_open_cases()
-        chat_cases = [
-            c for c in cases
-            if c.get("telegram_thread_id") == f"tg:{chat_id}"
-        ]
-        if not chat_cases:
+        case_id = self._active_case.get(chat_id)
+        if not case_id:
             await message.answer("Нет открытых кейсов для этого чата.")
             return
-        case = chat_cases[0]
-        self._pending_close[chat_id] = case["id"]
+        self._pending_close[chat_id] = case_id
         await message.answer(
-            f"Закрываем кейс #{case['id']}. Что оказалось причиной?"
+            f"Закрываем кейс #{case_id}. Что оказалось причиной?"
         )
 
     async def cmd_miscall(self, message: Message):
         chat_id = message.chat.id
-        cases = await self.db.get_open_cases()
-        chat_cases = [
-            c for c in cases
-            if c.get("telegram_thread_id") == f"tg:{chat_id}"
-        ]
-        if not chat_cases:
+        case_id = self._active_case.get(chat_id)
+        if not case_id:
             await message.answer("Нет открытых кейсов для этого чата.")
             return
-        case = chat_cases[0]
-        self._pending_miscall[chat_id] = case["id"]
+        self._pending_miscall[chat_id] = case_id
         await message.answer("Что было на самом деле?")
 
     # --- main message processing ---
@@ -129,6 +131,7 @@ class AutoelectricBot(BaseTelegramBot):
         if chat_id in self._pending_close and text:
             case_id = self._pending_close.pop(chat_id)
             await self.db.close_case(case_id, resolution=text)
+            self._active_case.pop(chat_id, None)
             await message.answer(f"Кейс #{case_id} закрыт. Спасибо!")
             return
 
@@ -143,41 +146,51 @@ class AutoelectricBot(BaseTelegramBot):
                 await message.answer(f"Не удалось загрузить отчёт X431: {exc}")
             return
 
+        # Auto-open case on first meaningful message in chat
+        if chat_id not in self._active_case and text:
+            case_id = await self.db.create_case(
+                vehicle_id=None,
+                session_id=None,
+                symptom=text[:500],
+                telegram_thread_id=f"tg:{chat_id}",
+            )
+            self._active_case[chat_id] = case_id
+
         # Claude conversation
-        try:
-            history = self.get_history(chat_id)
+        history = self.get_history(chat_id)
 
-            if image_b64:
-                content = [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": image_b64,
-                        },
+        if image_b64:
+            content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "image/jpeg",
+                        "data": image_b64,
                     },
-                    {"type": "text", "text": text or "Фото"},
-                ]
-            else:
-                content = text or ""
+                },
+                {"type": "text", "text": text or "Фото"},
+            ]
+        else:
+            content = text or ""
 
-            history.add_user(content)
-
+        history.add_user(content)
+        try:
             response = await self.claude_client.chat(
                 messages=history.get_messages(),
                 system=self.system_prompt,
             )
-
-            reply_text = "".join(
-                b.text for b in response.content if hasattr(b, "text")
-            )
-            history.add_assistant(reply_text)
-            await self.reply(message, reply_text)
-
         except Exception as exc:
+            history.messages.pop()  # rollback user-turn
             log.error("Claude API error: %s", exc, exc_info=True)
             await message.answer("Ошибка при обращении к модели. Логи у Игоря.")
+            return
+
+        reply_text = "".join(
+            b.text for b in response.content if hasattr(b, "text")
+        )
+        history.add_assistant(reply_text)
+        await self.reply(message, reply_text)
 
 
 async def main():
