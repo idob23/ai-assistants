@@ -84,7 +84,7 @@ class AutoelectricBot(BaseTelegramBot):
                 self._pending_miscall.pop(chat_id)
                 cancelled = True
             if cancelled:
-                await message.answer("Ожидание отменено.")
+                await message.answer("↩️ Ожидание отменено.")
             cmd = message.text.split()[0].split("@")[0]
             if cmd == "/start":
                 return await self.cmd_start(message)
@@ -109,41 +109,46 @@ class AutoelectricBot(BaseTelegramBot):
             )
             self._active_case.pop(chat_id, None)
         await message.answer(
-            "Я агент-автоэлектрик. Опиши симптом (текст/голос/фото) "
-            "или пришли ссылку на отчёт X431.\n"
-            "Команды: /status /close /miscall"
+            "🔧 Агент-автоэлектрик на связи.\n"
+            "Опиши симптом текстом, голосом или пришли фото.\n"
+            "Для готовых данных — URL отчёта X431.\n"
+            "\n"
+            "Команды:\n"
+            "/status  — открытые кейсы\n"
+            "/close   — закрыть текущий кейс\n"
+            "/miscall — отметить ошибку агента"
         )
 
     async def cmd_status(self, message: Message):
         cases = await self.db.get_open_cases()
         if not cases:
-            await message.answer("Открытых кейсов нет.")
+            await message.answer("✅ Открытых кейсов нет.")
             return
-        lines = [f"Открытых кейсов: {len(cases)}"]
+        lines = [f"📋 Открытых кейсов: {len(cases)}", ""]
         for c in cases[:5]:
             symptom = (c.get("symptom") or "")[:80]
-            lines.append(f"  #{c['id']}: {symptom}")
+            lines.append(f"  #{c['id']}  {symptom}")
         await message.answer("\n".join(lines))
 
     async def cmd_close(self, message: Message):
         chat_id = message.chat.id
         case_id = await self._find_open_case_id(chat_id)
         if not case_id:
-            await message.answer("Нет открытых кейсов для этого чата.")
+            await message.answer("ℹ️ Нет открытых кейсов для этого чата.")
             return
         self._pending_close[chat_id] = case_id
         await message.answer(
-            f"Закрываем кейс #{case_id}. Что оказалось причиной?"
+            f"📝 Закрываем кейс #{case_id}.\nЧто оказалось причиной?"
         )
 
     async def cmd_miscall(self, message: Message):
         chat_id = message.chat.id
         case_id = await self._find_open_case_id(chat_id)
         if not case_id:
-            await message.answer("Нет открытых кейсов для этого чата.")
+            await message.answer("ℹ️ Нет открытых кейсов для этого чата.")
             return
         self._pending_miscall[chat_id] = case_id
-        await message.answer("Что было на самом деле?")
+        await message.answer("🔄 Что было на самом деле?")
 
     # --- main message processing ---
 
@@ -155,7 +160,7 @@ class AutoelectricBot(BaseTelegramBot):
         if chat_id in self._pending_miscall and text:
             case_id = self._pending_miscall.pop(chat_id)
             await self.db.log_miscall(case_id, predicted="", actual=text)
-            await message.answer("Ошибка агента записана. Спасибо за обратную связь!")
+            await message.answer("✅ Ошибка агента записана.")
             return
 
         # Pending close
@@ -163,7 +168,7 @@ class AutoelectricBot(BaseTelegramBot):
             case_id = self._pending_close.pop(chat_id)
             await self.db.close_case(case_id, resolution=text)
             self._active_case.pop(chat_id, None)
-            await message.answer(f"Кейс #{case_id} закрыт. Спасибо!")
+            await message.answer(f"✅ Кейс #{case_id} закрыт.")
             return
 
         # X431 URL
@@ -174,7 +179,7 @@ class AutoelectricBot(BaseTelegramBot):
                 await handle_x431_url(self, message, url)
             except Exception as exc:
                 log.error("X431 parse error: %s", exc, exc_info=True)
-                await message.answer(f"Не удалось загрузить отчёт X431: {exc}")
+                await message.answer(f"⚠️ Не удалось загрузить отчёт X431: {exc}")
             return
 
         # Auto-open case on first meaningful message in chat
@@ -215,7 +220,7 @@ class AutoelectricBot(BaseTelegramBot):
         except Exception as exc:
             history.messages.pop()  # rollback user-turn
             log.error("Claude API error: %s", exc, exc_info=True)
-            await message.answer("Ошибка при обращении к модели. Логи у Игоря.")
+            await message.answer("⚠️ Ошибка при обращении к модели. Попробуй через минуту.")
             return
 
         reply_text = "".join(

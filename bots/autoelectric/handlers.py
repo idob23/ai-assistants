@@ -48,12 +48,17 @@ async def handle_x431_url(bot, message, url: str):
     )
 
     # Build summary
+    vehicle_parts = [p for p in [make, model, report.year] if p]
+    vehicle_str = " ".join(str(p) for p in vehicle_parts) or "не определена"
     lines = [
-        "Отчёт X431 загружен.",
-        f"Машина: {make} {model} {report.year}, VIN: {report.vin}",
+        "📄 Отчёт X431 загружен",
+        "",
+        f"Машина: {vehicle_str}",
+        f"VIN: {report.vin or 'не определён'}",
         f"Дата диагностики: {report.diag_datetime}",
-        f"Найдено {fault_count} кодов ошибок "
-        f"в {len(report.subsystems)} подсистемах:",
+        "",
+        f"Найдено {fault_count} кодов в {len(report.subsystems)} подсистемах:",
+        "",
     ]
     for sub in report.subsystems:
         for fc in sub.fault_codes:
