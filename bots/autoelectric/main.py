@@ -29,6 +29,12 @@ FALLBACK_PROMPT = (
 
 X431_MARKER = "x431.com/home/report/reportdetail"
 
+WEB_SEARCH_TOOL = {
+    "type": "web_search_20250305",
+    "name": "web_search",
+    "max_uses": 3,
+}
+
 
 class AutoelectricBot(BaseTelegramBot):
 
@@ -179,6 +185,7 @@ class AutoelectricBot(BaseTelegramBot):
             response = await self.claude_client.chat(
                 messages=history.get_messages(),
                 system=self.system_prompt,
+                tools=[WEB_SEARCH_TOOL],
             )
         except Exception as exc:
             history.messages.pop()  # rollback user-turn
