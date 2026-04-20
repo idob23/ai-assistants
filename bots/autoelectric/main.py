@@ -30,11 +30,12 @@ FALLBACK_PROMPT = (
 )
 
 BTN_STATUS = "📋 Статус"
+BTN_STATS = "📊 Статистика"
 BTN_CLOSE = "📝 Закрыть кейс"
 BTN_MISCALL = "🔄 Ошибка агента"
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text=BTN_STATUS)],
+        [KeyboardButton(text=BTN_STATUS), KeyboardButton(text=BTN_STATS)],
         [KeyboardButton(text=BTN_CLOSE), KeyboardButton(text=BTN_MISCALL)],
     ],
     resize_keyboard=True,
@@ -90,9 +91,11 @@ class AutoelectricBot(BaseTelegramBot):
             cmd_map = {
                 "/start": self.cmd_start,
                 "/status": self.cmd_status,
+                "/stats": self.cmd_stats,
                 "/close": self.cmd_close,
                 "/miscall": self.cmd_miscall,
                 BTN_STATUS: self.cmd_status,
+                BTN_STATS: self.cmd_stats,
                 BTN_CLOSE: self.cmd_close,
                 BTN_MISCALL: self.cmd_miscall,
             }
@@ -131,6 +134,7 @@ class AutoelectricBot(BaseTelegramBot):
             "\n"
             "Команды:\n"
             "/status  — открытые кейсы\n"
+            "/stats   — статистика работы\n"
             "/close   — закрыть текущий кейс\n"
             "/miscall — отметить ошибку агента",
             reply_markup=MAIN_KEYBOARD,
@@ -166,6 +170,45 @@ class AutoelectricBot(BaseTelegramBot):
             return
         self._pending_miscall[chat_id] = case_id
         await message.answer("🔄 Что было на самом деле?")
+
+    async def cmd_stats(self, message: Message):
+        cases = await self.db.get_cases_stats()
+        miscalls = await self.db.get_miscalls_stats(limit=5)
+        vehicles_n = await self.db.get_vehicles_count()
+        sessions_n = await self.db.get_sessions_count()
+
+        real_closed = max(cases["closed"] - cases["abandoned"], 0)
+        if real_closed > 0:
+            miscall_rate = (miscalls["total"] / real_closed) * 100
+            rate_str = f"{miscall_rate:.0f}%"
+        else:
+            rate_str = "—"
+
+        lines = [
+            "📊 Статистика работы",
+            "",
+            f"Кейсы: {cases['total']} всего",
+            f"  открытых: {cases['open']}",
+            f"  закрытых: {cases['closed']} "
+            f"(из них abandoned: {cases['abandoned']})",
+            "",
+            f"Ошибки бота (miscall): {miscalls['total']}",
+            f"Доля ошибок от реально закрытых: {rate_str}",
+            "",
+            f"Машин в базе: {vehicles_n}",
+            f"Отчётов X431: {sessions_n}",
+        ]
+
+        if miscalls["recent"]:
+            lines.append("")
+            lines.append("Последние ошибки агента:")
+            for m in miscalls["recent"]:
+                symptom = (m.get("symptom") or "")[:40]
+                actual = (m.get("actual") or "")[:60]
+                lines.append(f"  #{m['case_id']} {symptom}")
+                lines.append(f"    → {actual}")
+
+        await message.answer("\n".join(lines))
 
     # --- main message processing ---
 

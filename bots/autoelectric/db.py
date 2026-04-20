@@ -178,3 +178,56 @@ class Database:
         await self._conn.commit()
         row = await cur.fetchone()
         return row["id"]
+
+    # --- stats ---
+
+    async def get_cases_stats(self) -> dict:
+        """Return aggregated stats over all cases."""
+        cur = await self._conn.execute(
+            "SELECT "
+            "  COUNT(*) AS total, "
+            "  COUNT(*) FILTER (WHERE status = 'open') AS open_count, "
+            "  COUNT(*) FILTER (WHERE status = 'closed') AS closed_count, "
+            "  COUNT(*) FILTER (WHERE status = 'closed' "
+            "    AND resolution LIKE 'abandoned%%') AS abandoned_count "
+            "FROM diagnosis_cases"
+        )
+        row = await cur.fetchone()
+        return {
+            "total": row["total"] or 0,
+            "open": row["open_count"] or 0,
+            "closed": row["closed_count"] or 0,
+            "abandoned": row["abandoned_count"] or 0,
+        }
+
+    async def get_miscalls_stats(self, limit: int = 5) -> dict:
+        """Return miscall count + last N miscalls joined with case info."""
+        cur = await self._conn.execute(
+            "SELECT COUNT(*) AS total FROM agent_miscalls"
+        )
+        row = await cur.fetchone()
+        total = row["total"] or 0
+
+        cur = await self._conn.execute(
+            "SELECT m.id, m.case_id, m.actual, m.created_at, "
+            "       c.symptom "
+            "FROM agent_miscalls m "
+            "LEFT JOIN diagnosis_cases c ON c.id = m.case_id "
+            "ORDER BY m.created_at DESC "
+            "LIMIT %s",
+            (limit,),
+        )
+        recent = await cur.fetchall()
+        return {"total": total, "recent": list(recent)}
+
+    async def get_vehicles_count(self) -> int:
+        cur = await self._conn.execute("SELECT COUNT(*) AS n FROM vehicles")
+        row = await cur.fetchone()
+        return row["n"] or 0
+
+    async def get_sessions_count(self) -> int:
+        cur = await self._conn.execute(
+            "SELECT COUNT(*) AS n FROM diagnostic_sessions"
+        )
+        row = await cur.fetchone()
+        return row["n"] or 0
