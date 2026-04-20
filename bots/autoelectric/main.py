@@ -43,6 +43,28 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 )
 
 
+REPO_ROOT = Path(__file__).parent.parent.parent
+
+
+def load_vehicle_database(base_dir: Path) -> tuple[str, int]:
+    """Load all description.md files from data/schemas/*/.
+
+    Returns (combined_text, count). Text is empty if nothing found.
+    """
+    schemas_dir = base_dir / "data" / "schemas"
+    if not schemas_dir.is_dir():
+        return "", 0
+    files = sorted(schemas_dir.glob("*/description.md"))
+    if not files:
+        return "", 0
+    sections = []
+    for f in files:
+        sections.append(f.read_text(encoding="utf-8"))
+    header = "# База машин парка артели"
+    body = ("\n\n---\n\n").join(sections)
+    return f"{header}\n\n{body}", len(files)
+
+
 class AutoelectricBot(BaseTelegramBot):
 
     def __init__(self, token: str, allowed_users: list[int] | None = None):
@@ -51,6 +73,10 @@ class AutoelectricBot(BaseTelegramBot):
             self.system_prompt = PROMPT_PATH.read_text(encoding="utf-8")
         except FileNotFoundError:
             self.system_prompt = FALLBACK_PROMPT
+        vehicle_db, n = load_vehicle_database(REPO_ROOT)
+        if vehicle_db:
+            self.system_prompt = self.system_prompt + "\n\n" + vehicle_db
+            log.info("Loaded %d vehicles from data/schemas/", n)
         settings = get_settings()
         self.db = Database(settings.DATABASE_URL)
         self._pending_close: dict[int, int] = {}
